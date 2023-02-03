@@ -8,11 +8,9 @@ import (
 	"image/jpeg"
 	"log"
 	"os"
-	"time"
 
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/query"
-	"github.com/gotd/td/telegram/query/channels/participants"
 	"github.com/gotd/td/tg"
 )
 
@@ -31,38 +29,29 @@ func SaveUsers(ctx context.Context, sender *message.Sender, client *tg.Client, c
 	}
 
 	fmt.Println("Paticipants: ", size)
-	err = query.GetParticipants(client, queryB).ForEach(ctx, callBackParticipants(size, client, channelName))
+	iter := query.GetParticipants(client, queryB).BatchSize(1000).Iter()
+
+	n := 0
+	for iter.Next(ctx) {
+		n++
+		user, _ := iter.Value().User()
+		fmt.Println(n, user.ID, user.Username, user.Phone)
+
+		if user.Photo == nil {
+			continue
+		}
+		photo, ok := user.Photo.AsNotEmpty()
+		if !ok {
+			continue
+		}
+		fileName := fmt.Sprintf("%d_%s", user.ID, user.Username)
+		savePhoto(ctx, client, photo, user.ID, fileName, user.AccessHash, channelName)
+	}
+
 	if err != nil {
 		fmt.Println(err)
 		panic(err)
 	}
-}
-
-func callBackParticipants(size int, client *tg.Client, channelName string) func(ctx context.Context, participant participants.Elem) error {
-	iterator := 0
-
-	callBackParticipants := func(ctx context.Context, participant participants.Elem) error {
-		iterator++
-		user, ok := participant.User()
-		if !ok {
-			return nil
-		}
-		fmt.Println(iterator, " of ", size, " - ", user.ID, user.Username, user.Phone)
-
-		if user.Photo == nil {
-			return nil
-		}
-		photo, ok := user.Photo.AsNotEmpty()
-		if !ok {
-			return nil
-		}
-		fileName := fmt.Sprintf("%d_%s", user.ID, user.Username)
-		savePhoto(ctx, client, photo, user.ID, fileName, user.AccessHash, channelName)
-		time.Sleep(500 * time.Millisecond)
-		return nil
-	}
-
-	return callBackParticipants
 }
 
 func savePhoto(
@@ -93,7 +82,6 @@ func savePhoto(
 	if err != nil {
 		fmt.Println("Error upload", err)
 	}
-	time.Sleep(1 * time.Second)
 	switch result := final.(type) {
 	case *tg.UploadFile:
 		saveFile(result.Bytes, groupName, fileName)
